@@ -92,7 +92,7 @@ def wdm_transform(x, Nt, Nf, A, d):
         raise ValueError("Nt,Nf even; 0<A<0.5; d>0 required.")
 
     # Step 1: Compute X[l] = FFT(x) (Cornish notation)
-    X = fft.fft(x)
+    X = fft.fft(x) # [Dc, +ive freqs, -ive freqs, nyquist]
 
     # Step 2: Build frequency domain window Φ[l] from Eq. (11)
     # Note: "discrete Fourier samples are evaluated at f = l*Δf" (Cornish text)
