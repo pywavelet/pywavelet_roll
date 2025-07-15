@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import betainc
-from numpy.fft import fft, ifft, fftfreq
+from numpy import fft
 
 
 def Phi_unit(f, A, d):
@@ -48,17 +48,8 @@ def wdm_times_frequencies(nt, nf, dt):
     return np.arange(nt) * ΔT, np.arange(nf) * ΔF
 
 
-def wdm_transform(x_or_rfft, nt, nf, A, d):
-    """
-    Forward WDM transform. Accepts either time-domain signal `x` of length nt*nf
-    or its rfft (length nt*nf//2+1). Returns WDM coefficients shape (nt,nf).
-    """
+def wdm_transform(x, nt, nf, A, d):
     n_total = nt * nf
-    # Reconstruct x from RFFT if needed
-    if np.iscomplexobj(x_or_rfft) and x_or_rfft.shape[-1] == n_total // 2 + 1:
-        x = ifft(np.concatenate([x_or_rfft, np.conj(x_or_rfft[-2:0:-1])])).real
-    else:
-        x = x_or_rfft
 
     if x.shape[-1] != n_total:
         raise ValueError(f"len(x) must be nt*nf = {n_total}")
@@ -66,29 +57,54 @@ def wdm_transform(x_or_rfft, nt, nf, A, d):
         raise ValueError("nt,nf even; 0<A<0.5; d>0 required.")
 
     # full FFT
-    X_fft = fft(x)
+    X_fft = fft.fft(x)
 
     # build phi window
-    fs_full = fftfreq(n_total)
+    fs_full = fft.fftfreq(n_total)
     half = nt // 2
     fs_phi = np.concatenate([fs_full[:half], fs_full[-half:]])
-    phi = Phi_unit(fs_phi / (1.0/(2.0*nf)), A, d) / np.sqrt(1.0/(2.0*nf))
+    phi = Phi_unit(fs_phi / (1.0 / (2.0 * nf)), A, d) / np.sqrt(1.0 / (2.0 * nf))
 
     W = np.zeros((nt, nf), dtype=float)
     center = n_total // 2
     start = center - half
 
+    # Handle m=1 to nf-1 (the regular frequency bands)
     for m in range(1, nf):
         shift = center - m * half
         rolled = np.roll(X_fft, shift)
-        sl = rolled[start:start+nt]
+        sl = rolled[start:start + nt]
         block = np.concatenate([sl[half:], sl[:half]])
-        xnm = ifft(block * phi)
+        xnm = fft.ifft(block * phi)
+        # parity factor: swap real/imag mapping
         n = np.arange(nt)
         parity = (n + m) % 2
+        # even indices use imaginary, odd use real
         C = np.where(parity == 0, 1, 1j)
-        W[:, m] = (np.sqrt(2.0)/nf) * np.real(C * xnm)
+        W[:, m] = (np.sqrt(2.0) / nf) * np.real(C * xnm)
+
+    # Handle m=0 (DC components) - store in even indices of column 0
+    shift = center  # No shift for DC
+    rolled = np.roll(X_fft, shift)
+    sl = rolled[start:start + nt]
+    block = np.concatenate([sl[half:], sl[:half]])
+    xnm = fft.ifft(block * phi)
+    # DC components go to even indices with sqrt(2) normalization and factor of 1/2
+    for n in range(0, nt, 2):
+        W[n, 0] = np.real(xnm[n]) * np.sqrt(2.0) / (2.0 * nf)
+
+    # Handle m=nf (Nyquist components) - store in odd indices of column 0
+    shift = center - nf * half
+    rolled = np.roll(X_fft, shift)
+    sl = rolled[start:start + nt]
+    block = np.concatenate([sl[half:], sl[:half]])
+    xnm = fft.ifft(block * phi)
+    # Nyquist components go to odd indices with sqrt(2) normalization and factor of 1/2
+    for n in range(1, nt, 2):
+        W[n, 0] = np.real(xnm[n - 1]) * np.sqrt(2.0) / (2.0 * nf)
+
     return W
+
 
 
 
@@ -96,7 +112,7 @@ def wdm_inverse_transform(W, A, d):
     nt, nf = W.shape
     n_total = nt * nf
     # validation omitted for brevity
-    fs_full = fftfreq(n_total)
+    fs_full = fft.fftfreq(n_total)
     half = nt // 2
     fs_phi = np.concatenate([fs_full[:half], fs_full[-half:]])
     phi = Phi_unit(fs_phi / (1.0/(2.0*nf)), A, d)
@@ -108,7 +124,7 @@ def wdm_inverse_transform(W, A, d):
     ylm = np.zeros((nt, nf), complex)
     ylm[:,1:] = (C[:,1:] * W[:,1:] / np.sqrt(2.0)) * nf
 
-    Y = fft(ylm, axis=0)
+    Y = fft.fft(ylm, axis=0)
     X_rec = np.zeros(n_total, complex)
     center = n_total // 2
     start = center - half
@@ -120,4 +136,4 @@ def wdm_inverse_transform(W, A, d):
         temp[start:start+nt] = np.concatenate([neg, pos])
         X_rec += np.roll(temp, m * half - center)
 
-    return np.real(ifft(X_rec))
+    return np.real(fft.ifft(X_rec))
